@@ -46,6 +46,8 @@ class SettingsScreen extends ConsumerWidget {
           _keyStatus('GROQ', groqApiKey),
           const SizedBox(height: 8),
           _keyStatus('GEMINI', geminiApiKey),
+          const SizedBox(height: 8),
+          _ownStatus(),
           const SizedBox(height: 28),
           _sectionLabel('ACTIONS'),
           const SizedBox(height: 10),
@@ -92,6 +94,7 @@ class SettingsScreen extends ConsumerWidget {
         children: [
           _providerChip(ref, 'groq', 'GROQ', active),
           _providerChip(ref, 'gemini', 'GEMINI', active),
+          _providerChip(ref, 'own', 'OWN', active),
         ],
       ),
     );
@@ -174,6 +177,43 @@ class SettingsScreen extends ConsumerWidget {
                 Text(display,
                     style: GoogleFonts.rajdhani(
                         color: Colors.white.withValues(alpha: 0.45), fontSize: 12)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _ownStatus() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f2035),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: const Color(0xFF00d4ff).withValues(alpha: 0.28),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.electrical_services_outlined,
+              color: Color(0xFF00d4ff), size: 18),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('OWN (FastAPI)',
+                    style: GoogleFonts.orbitron(
+                        color: const Color(0xFF00d4ff),
+                        fontSize: 11,
+                        letterSpacing: 2)),
+                const SizedBox(height: 2),
+                Text(ownApiUrl,
+                    style: GoogleFonts.rajdhani(
+                        color: Colors.white.withValues(alpha: 0.45),
+                        fontSize: 12)),
               ],
             ),
           ),

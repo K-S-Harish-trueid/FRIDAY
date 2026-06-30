@@ -1,5 +1,6 @@
 import 'groq_service.dart';
 import 'gemini_service.dart';
+import 'own_service.dart';
 
 class FridayService {
   static String buildSystemPrompt() {
@@ -32,6 +33,8 @@ Today: $date.''';
 
     if (provider == 'gemini') {
       return GeminiService.sendMessage(messages);
+    } else if (provider == 'own') {
+      return OwnService.sendMessage(messages);
     } else {
       return GroqService.sendMessage(messages);
     }
