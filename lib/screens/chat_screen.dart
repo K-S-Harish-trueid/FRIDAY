@@ -242,6 +242,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               Expanded(child: _buildMessages(state)),
               _buildInputBar(
                 isExecutingAction: state.isExecutingAction,
+                pendingLocationChoice: state.pendingLocationChoice,
                 busy: state.isTyping || state.isExecutingAction,
               ),
             ],
@@ -421,7 +422,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   // ── Input bar ─────────────────────────────────────────────────────────────
 
-  Widget _buildInputBar({required bool isExecutingAction, required bool busy}) {
+  Widget _buildInputBar({
+    required bool isExecutingAction,
+    required bool pendingLocationChoice,
+    required bool busy,
+  }) {
     return SafeArea(
       top: false,
       child: Column(
@@ -429,6 +434,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         children: [
           // ── Action HUD (visible while a device action is executing) ──
           if (isExecutingAction) const _ActionHud(),
+          // ── Location choice (backend wants location, no place given) ──
+          if (pendingLocationChoice)
+            _LocationChoiceCard(
+              onUseMyLocation: () =>
+                  ref.read(chatProvider.notifier).useMyLocation(),
+              onEnterManually: () {
+                ref.read(chatProvider.notifier).dismissLocationChoice();
+                _focusNode.requestFocus();
+              },
+            ),
           // ── Voice overlay (visible when mic is active) ──
           ValueListenableBuilder<SpeechStatus>(
             valueListenable: _speechService.status,
@@ -848,6 +863,116 @@ class _ActionHud extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Location choice — backend needs a place, none was named ──────────────────
+
+class _LocationChoiceCard extends StatelessWidget {
+  final VoidCallback onUseMyLocation;
+  final VoidCallback onEnterManually;
+
+  const _LocationChoiceCard({
+    required this.onUseMyLocation,
+    required this.onEnterManually,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0a1628),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF00d4ff).withValues(alpha: 0.45)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00d4ff).withValues(alpha: 0.1),
+            blurRadius: 12,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.location_on_outlined,
+                  color: Color(0xFF00d4ff), size: 15),
+              const SizedBox(width: 8),
+              Text(
+                'WHICH LOCATION, BOSS?',
+                style: GoogleFonts.orbitron(
+                  color: const Color(0xFF00d4ff),
+                  fontSize: 10,
+                  letterSpacing: 2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _choiceButton(
+                  icon: Icons.my_location,
+                  label: 'MY LOCATION',
+                  color: const Color(0xFF00ff88),
+                  onTap: onUseMyLocation,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _choiceButton(
+                  icon: Icons.edit_outlined,
+                  label: 'ENTER MANUALLY',
+                  color: const Color(0xFF00d4ff),
+                  onTap: onEnterManually,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _choiceButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.orbitron(
+                color: color,
+                fontSize: 9,
+                letterSpacing: 1,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

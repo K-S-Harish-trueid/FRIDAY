@@ -17,6 +17,7 @@ class ChatState {
   final String activeProvider;
   final String? conversationId;
   final bool isExecutingAction;
+  final bool pendingLocationChoice;
 
   const ChatState({
     required this.messages,
@@ -24,6 +25,7 @@ class ChatState {
     required this.activeProvider,
     this.conversationId,
     this.isExecutingAction = false,
+    this.pendingLocationChoice = false,
   });
 
   ChatState copyWith({
@@ -32,6 +34,7 @@ class ChatState {
     String? activeProvider,
     Object? conversationId = _unset,
     bool? isExecutingAction,
+    bool? pendingLocationChoice,
   }) {
     return ChatState(
       messages: messages ?? this.messages,
@@ -41,6 +44,8 @@ class ChatState {
           ? this.conversationId
           : conversationId as String?,
       isExecutingAction: isExecutingAction ?? this.isExecutingAction,
+      pendingLocationChoice:
+          pendingLocationChoice ?? this.pendingLocationChoice,
     );
   }
 }
@@ -71,7 +76,10 @@ class ChatNotifier extends Notifier<ChatState> {
     if (state.isTyping || state.isExecutingAction) return;
 
     final userMsg = Message(role: 'user', content: content);
-    state = state.copyWith(messages: [...state.messages, userMsg]);
+    state = state.copyWith(
+      messages: [...state.messages, userMsg],
+      pendingLocationChoice: false,
+    );
 
     // ── 1. Local commands (no API call) ──────────────────────────────────────
     final result = await FridayCommands.handle(content);
@@ -139,7 +147,13 @@ class ChatNotifier extends Notifier<ChatState> {
       );
 
       if (action != null) {
-        await _runAction(action);
+        if (action.type == 'get_location') {
+          // Don't grab GPS silently — let the user pick "my location" vs.
+          // typing a place in manually.
+          state = state.copyWith(pendingLocationChoice: true);
+        } else {
+          await _runAction(action);
+        }
       }
     } catch (e) {
       final errMsg = Message(
@@ -165,6 +179,19 @@ class ChatNotifier extends Notifier<ChatState> {
     } catch (_) {
       state = state.copyWith(isExecutingAction: false);
     }
+  }
+
+  /// User tapped "My Location" on the pending location-choice card — fetch
+  /// GPS and send it as a follow-up message.
+  Future<void> useMyLocation() async {
+    state = state.copyWith(pendingLocationChoice: false);
+    await _runAction(const Action(type: 'get_location'));
+  }
+
+  /// User tapped "Enter Manually" — just dismiss the card; the UI focuses
+  /// the text field so they can type a place themselves.
+  void dismissLocationChoice() {
+    state = state.copyWith(pendingLocationChoice: false);
   }
 
   /// Load a historical conversation from the backend into the chat view.
