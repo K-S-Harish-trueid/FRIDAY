@@ -1,5 +1,7 @@
 import 'dart:math';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../config.dart';
 import 'joke_bank.dart';
 
 enum CommandType {
@@ -9,6 +11,8 @@ enum CommandType {
   identity,
   battery,
   clear,
+  newChat,
+  preference,
   joke,
   help,
   camera,
@@ -29,15 +33,35 @@ class CommandResult {
   });
 }
 
+const _slashHelpText = '''Slash commands:
+
+• /new — Start a new mission (keeps old ones in the log)
+• /clear — Wipe this conversation for good
+• /preference — Show what's stored about you
+• /help — Show this list
+
+Plain commands still work too — try "help".''';
+
 class FridayCommands {
   static final Battery _battery = Battery();
   static final Random _random = Random();
 
   static Future<CommandResult> handle(String input) async {
-    final lower = input.toLowerCase().trim();
+    final trimmed = input.trim();
+    final lower = trimmed.toLowerCase();
 
-    if (_matches(lower, ['what time', 'current time', 'time now']) ||
-        lower == 'time') {
+    // ── Slash commands ─────────────────────────────────────────────────────
+    if (lower.startsWith('/')) {
+      return _handleSlash(lower.substring(1).trim());
+    }
+
+    bool hasWord(String word) => RegExp('\\b$word\\b').hasMatch(lower);
+
+    if (lower == 'time' ||
+        (hasWord('time') &&
+            (lower.contains('what') ||
+                lower.contains('current') ||
+                lower.contains('now')))) {
       final now = DateTime.now();
       final h = now.hour.toString().padLeft(2, '0');
       final m = now.minute.toString().padLeft(2, '0');
@@ -48,9 +72,12 @@ class FridayCommands {
       );
     }
 
-    if (_matches(lower,
-        ["today's date", 'what day', 'what date', 'current date']) ||
-        lower == 'date') {
+    if (lower == 'date' ||
+        (hasWord('date') &&
+            (lower.contains('what') ||
+                lower.contains('today') ||
+                lower.contains('current'))) ||
+        lower.contains('what day')) {
       final now = DateTime.now();
       const weekdays = [
         'Monday', 'Tuesday', 'Wednesday', 'Thursday',
@@ -69,7 +96,7 @@ class FridayCommands {
       );
     }
 
-    if (_matches(lower, ['hey friday', 'hello', 'hi friday']) ||
+    if (_matches(lower, ['hey friday', 'hi friday']) ||
         lower == 'hi' ||
         lower == 'hey' ||
         lower == 'hello') {
@@ -84,7 +111,7 @@ class FridayCommands {
       return CommandResult(
         type: CommandType.identity,
         message:
-            "F.R.I.D.A.Y. — Female Replacement Intelligent Digital Assistant Youth. Built by Harish. How can I assist?",
+            "F.R.I.D.A.Y — Female Replacement Intelligent Digital Assistant Youth. Built by Harish. How can I assist?",
         handled: true,
       );
     }
@@ -144,6 +171,8 @@ class FridayCommands {
 • help — Show this list
 • shutdown / bye friday — Power down
 
+$_slashHelpText
+
 ...and anything else, just ask.''';
       return CommandResult(
         type: CommandType.help,
@@ -182,6 +211,57 @@ class FridayCommands {
     }
 
     return const CommandResult(type: CommandType.unknown, handled: false);
+  }
+
+  static Future<CommandResult> _handleSlash(String cmd) async {
+    switch (cmd) {
+      case 'new':
+      case 'newchat':
+      case 'new chat':
+        return const CommandResult(
+          type: CommandType.newChat,
+          message: 'Starting a new mission, boss.',
+          handled: true,
+        );
+
+      case 'clear':
+      case 'reset':
+        return const CommandResult(
+          type: CommandType.clear,
+          message: 'Memory wiped. Starting fresh.',
+          handled: true,
+        );
+
+      case 'preference':
+      case 'preferences':
+      case 'prefs':
+        final prefs = await SharedPreferences.getInstance();
+        final provider = prefs.getString(providerPrefsKey) ?? defaultProvider;
+        final message = '''Here's what I have stored about you, boss:
+
+• Active provider: ${provider.toUpperCase()}
+
+That's everything persisted on this device right now — I don't yet keep long-term memory of facts across conversations. Ask if you want that built.''';
+        return CommandResult(
+          type: CommandType.preference,
+          message: message,
+          handled: true,
+        );
+
+      case 'help':
+        return const CommandResult(
+          type: CommandType.help,
+          message: _slashHelpText,
+          handled: true,
+        );
+
+      default:
+        return CommandResult(
+          type: CommandType.unknown,
+          message: 'Unknown command "/$cmd", boss. Try /help for the list.',
+          handled: true,
+        );
+    }
   }
 
   static bool _matches(String input, List<String> patterns) {

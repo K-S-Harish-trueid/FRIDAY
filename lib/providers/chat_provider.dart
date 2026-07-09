@@ -8,8 +8,6 @@ import '../commands/friday_commands.dart';
 import '../services/action_service.dart';
 import '../services/backend_service.dart';
 
-const _providerPrefsKey = 'active_provider';
-
 // Sentinel used so copyWith can explicitly set conversationId to null.
 const _unset = Object();
 
@@ -60,7 +58,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
   Future<void> _loadProvider() async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString(_providerPrefsKey);
+    final saved = prefs.getString(providerPrefsKey);
     if (saved != null && saved != state.activeProvider) {
       state = state.copyWith(activeProvider: saved);
     }
@@ -88,6 +86,23 @@ class ChatNotifier extends Notifier<ChatState> {
         _deleteActiveConversation();
         state = ChatState(
           messages: [clearMsg],
+          isTyping: false,
+          activeProvider: state.activeProvider,
+          conversationId: null,
+        );
+        return;
+      }
+
+      if (result.type == CommandType.newChat) {
+        // Unlike clear, this preserves the old conversation in Mission Log —
+        // just starts a fresh one, same as the drawer's "NEW MISSION" button.
+        final newMsg = Message(
+          role: 'assistant',
+          content: result.message!,
+          isCommand: true,
+        );
+        state = ChatState(
+          messages: [newMsg],
           isTyping: false,
           activeProvider: state.activeProvider,
           conversationId: null,
@@ -175,7 +190,7 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> changeProvider(String provider) async {
     state = state.copyWith(activeProvider: provider);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_providerPrefsKey, provider);
+    await prefs.setString(providerPrefsKey, provider);
   }
 
   void clearChat() {

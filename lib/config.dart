@@ -4,3 +4,7 @@
 const String defaultProvider = 'own';
 
 const String backendBaseUrl = 'https://friday-backend-t7xa.onrender.com';
+
+// shared_preferences key for the persisted provider choice — read by both
+// ChatNotifier and the "/preference" slash command.
+const String providerPrefsKey = 'active_provider';
