@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
+import '../models/action.dart';
 import '../models/message.dart';
 import '../commands/friday_commands.dart';
+import '../services/action_service.dart';
 import '../services/backend_service.dart';
 
 const _providerPrefsKey = 'active_provider';
@@ -15,12 +17,14 @@ class ChatState {
   final bool isTyping;
   final String activeProvider;
   final String? conversationId;
+  final bool isExecutingAction;
 
   const ChatState({
     required this.messages,
     required this.isTyping,
     required this.activeProvider,
     this.conversationId,
+    this.isExecutingAction = false,
   });
 
   ChatState copyWith({
@@ -28,6 +32,7 @@ class ChatState {
     bool? isTyping,
     String? activeProvider,
     Object? conversationId = _unset,
+    bool? isExecutingAction,
   }) {
     return ChatState(
       messages: messages ?? this.messages,
@@ -36,6 +41,7 @@ class ChatState {
       conversationId: identical(conversationId, _unset)
           ? this.conversationId
           : conversationId as String?,
+      isExecutingAction: isExecutingAction ?? this.isExecutingAction,
     );
   }
 }
@@ -98,16 +104,24 @@ class ChatNotifier extends Notifier<ChatState> {
 
     // ── 2. BackendService (only path — all LLM calls happen server-side) ──────
     try {
-      final (response, newConvId) =
-          await BackendService.sendMessage(content, state.conversationId);
+      final history = state.messages
+          .where((m) => !m.isCommand)
+          .map((m) => {'role': m.role, 'content': m.content})
+          .toList();
+
+      final (response, newConvId, action) =
+          await BackendService.sendMessage(history, state.conversationId);
 
       final assistantMsg = Message(role: 'assistant', content: response);
       state = state.copyWith(
         messages: [...state.messages, assistantMsg],
         isTyping: false,
-        // Keep existing id if backend returned null (local command on server).
         conversationId: newConvId ?? state.conversationId,
       );
+
+      if (action != null) {
+        await _runAction(action);
+      }
     } catch (e) {
       final errMsg = Message(
         role: 'assistant',
@@ -117,6 +131,20 @@ class ChatNotifier extends Notifier<ChatState> {
         messages: [...state.messages, errMsg],
         isTyping: false,
       );
+    }
+  }
+
+  // ── 3. Device action (maps / location) dispatched by the backend agent ────
+  Future<void> _runAction(Action action) async {
+    state = state.copyWith(isExecutingAction: true);
+    try {
+      final followUp = await ActionService.execute(action);
+      state = state.copyWith(isExecutingAction: false);
+      if (followUp != null) {
+        await sendMessage(followUp);
+      }
+    } catch (_) {
+      state = state.copyWith(isExecutingAction: false);
     }
   }
 
