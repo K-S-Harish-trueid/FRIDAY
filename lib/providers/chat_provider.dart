@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
@@ -81,7 +82,7 @@ class ChatNotifier extends Notifier<ChatState> {
           content: result.message!,
           isCommand: true,
         );
-        // Clear also resets the backend conversation so a new one starts next.
+        _deleteActiveConversation();
         state = ChatState(
           messages: [clearMsg],
           isTyping: false,
@@ -175,12 +176,22 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   void clearChat() {
+    _deleteActiveConversation();
     state = ChatState(
       messages: [],
       isTyping: false,
       activeProvider: state.activeProvider,
       conversationId: null,
     );
+  }
+
+  /// Best-effort delete of the conversation being cleared so it doesn't
+  /// linger in the Mission Log. Fire-and-forget — the local UI reset
+  /// happens regardless of whether the backend call succeeds.
+  void _deleteActiveConversation() {
+    final id = state.conversationId;
+    if (id == null) return;
+    unawaited(BackendService.deleteConversation(id).catchError((_) {}));
   }
 }
 
