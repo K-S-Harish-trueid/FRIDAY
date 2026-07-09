@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:math';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../providers/chat_provider.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
@@ -115,13 +118,39 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (busy.isTyping || busy.isExecutingAction) return;
 
     HapticFeedback.mediumImpact();
-    await _ttsService.stop();
+    // Instant visual feedback — don't make the user wait on TTS/permission
+    // async work before the button even looks like it registered the hold.
     setState(() {
       _isRecording = true;
       _isCancelling = false;
       _holdStartPosition = details.globalPosition;
     });
-    await _speechService.startListening();
+    unawaited(_ttsService.stop());
+
+    final started = await _speechService.startListening();
+    if (!started && mounted) {
+      setState(() => _isRecording = false);
+      final deniedForever = _speechService.permissionPermanentlyDenied;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            deniedForever
+                ? "Mic permission is blocked, boss — enable it in system settings."
+                : "Couldn't access the mic, boss — permission denied.",
+            style: GoogleFonts.rajdhani(color: Colors.white),
+          ),
+          backgroundColor: const Color(0xFF0f2035),
+          behavior: SnackBarBehavior.floating,
+          action: deniedForever
+              ? SnackBarAction(
+                  label: 'SETTINGS',
+                  textColor: const Color(0xFF00d4ff),
+                  onPressed: openAppSettings,
+                )
+              : null,
+        ),
+      );
+    }
   }
 
   void _handleMicHoldMove(LongPressMoveUpdateDetails details) {
@@ -489,12 +518,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 final iconColor = _isCancelling || _isRecording
                     ? micColor
                     : const Color(0xFF00d4ff).withValues(alpha: 0.55);
-                return GestureDetector(
+                return RawGestureDetector(
                   key: const Key('chat_mic_button'),
-                  onLongPressStart: busy ? null : _handleMicHoldStart,
-                  onLongPressMoveUpdate: busy ? null : _handleMicHoldMove,
-                  onLongPressEnd: busy ? null : _handleMicHoldEnd,
-                  onLongPressCancel: busy ? null : _handleMicHoldCancel,
+                  gestures: busy
+                      ? const {}
+                      : {
+                          LongPressGestureRecognizer:
+                              GestureRecognizerFactoryWithHandlers<
+                                  LongPressGestureRecognizer>(
+                            // Shorter than the default 500ms so holding the
+                            // mic feels immediate, push-to-talk style.
+                            () => LongPressGestureRecognizer(
+                              duration: const Duration(milliseconds: 150),
+                            ),
+                            (instance) {
+                              instance
+                                ..onLongPressStart = _handleMicHoldStart
+                                ..onLongPressMoveUpdate = _handleMicHoldMove
+                                ..onLongPressEnd = _handleMicHoldEnd
+                                ..onLongPressCancel = _handleMicHoldCancel;
+                            },
+                          ),
+                        },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     width: 46,

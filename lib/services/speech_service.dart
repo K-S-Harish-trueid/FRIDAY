@@ -18,13 +18,22 @@ class SpeechService {
   bool _continuousMode = false;
   bool _paused = false;
 
+  /// Set after a failed [initialize] when the mic permission was denied
+  /// with "don't ask again" — the permission dialog won't reappear, so the
+  /// UI should point the user at app settings instead of retrying.
+  bool permissionPermanentlyDenied = false;
+
   void Function(String text)? onResult;
 
   bool get isActive => _continuousMode;
 
   Future<bool> initialize() async {
     final micPerm = await Permission.microphone.request();
-    if (!micPerm.isGranted) return false;
+    if (!micPerm.isGranted) {
+      permissionPermanentlyDenied = micPerm.isPermanentlyDenied;
+      return false;
+    }
+    permissionPermanentlyDenied = false;
 
     _initialized = await _stt.initialize(
       onError: (error) {
@@ -42,14 +51,18 @@ class SpeechService {
     return _initialized;
   }
 
-  Future<void> startListening() async {
+  /// Returns false (without doing anything) if the mic permission was
+  /// denied or the speech engine failed to initialize — callers must check
+  /// this instead of assuming a hold always starts a real recording.
+  Future<bool> startListening() async {
     if (!_initialized) {
       final ok = await initialize();
-      if (!ok) return;
+      if (!ok) return false;
     }
     _continuousMode = true;
     _paused = false;
     _listen();
+    return true;
   }
 
   /// Finalizes the current listen and delivers whatever was recognized so
