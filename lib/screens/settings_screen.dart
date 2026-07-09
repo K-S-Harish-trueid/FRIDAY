@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import '../providers/chat_provider.dart';
 import '../config.dart';
 
@@ -9,8 +11,6 @@ class SettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final chatState = ref.watch(chatProvider);
-
     return Scaffold(
       backgroundColor: const Color(0xFF0a0a1a),
       appBar: AppBar(
@@ -37,17 +37,9 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          _sectionLabel('AI PROVIDER'),
+          _sectionLabel('BACKEND'),
           const SizedBox(height: 10),
-          _providerToggle(ref, chatState.activeProvider),
-          const SizedBox(height: 28),
-          _sectionLabel('API KEY STATUS'),
-          const SizedBox(height: 10),
-          _keyStatus('GROQ', groqApiKey),
-          const SizedBox(height: 8),
-          _keyStatus('GEMINI', geminiApiKey),
-          const SizedBox(height: 8),
-          _ownStatus(),
+          _backendStatus(),
           const SizedBox(height: 28),
           _sectionLabel('ACTIONS'),
           const SizedBox(height: 10),
@@ -82,144 +74,87 @@ class SettingsScreen extends ConsumerWidget {
         ),
       );
 
-  Widget _providerToggle(WidgetRef ref, String active) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f2035),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF00d4ff).withValues(alpha: 0.18)),
-      ),
-      padding: const EdgeInsets.all(4),
-      child: Row(
-        children: [
-          _providerChip(ref, 'groq', 'GROQ', active),
-          _providerChip(ref, 'gemini', 'GEMINI', active),
-          _providerChip(ref, 'own', 'OWN', active),
-        ],
-      ),
-    );
-  }
-
-  Widget _providerChip(
-      WidgetRef ref, String value, String label, String active) {
-    final on = active == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => ref.read(chatProvider.notifier).changeProvider(value),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          padding: const EdgeInsets.symmetric(vertical: 13),
-          decoration: BoxDecoration(
-            color: on
-                ? const Color(0xFF00d4ff).withValues(alpha: 0.18)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            border: on
-                ? Border.all(color: const Color(0xFF00d4ff), width: 1.2)
-                : null,
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.orbitron(
-              color: on
-                  ? const Color(0xFF00d4ff)
-                  : Colors.white.withValues(alpha: 0.35),
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 2,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _keyStatus(String provider, String key) {
-    final configured = key.isNotEmpty &&
-        key != 'YOUR_GROQ_API_KEY' &&
-        key != 'YOUR_GEMINI_API_KEY';
-    final display = configured
-        ? '${key.substring(0, min(6, key.length))}••••••••${key.length > 4 ? key.substring(key.length - 4) : ''}'
-        : 'Not configured';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f2035),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: configured
-              ? const Color(0xFF00ff88).withValues(alpha: 0.28)
-              : const Color(0xFFff6b35).withValues(alpha: 0.28),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            configured ? Icons.check_circle_outline : Icons.error_outline,
-            color: configured
+  // All LLM calls (Groq primary, Gemini fallback) happen server-side —
+  // this card just reports whether the backend is reachable.
+  Widget _backendStatus() {
+    return FutureBuilder<bool>(
+      future: _pingBackend(),
+      builder: (context, snap) {
+        final loading = snap.connectionState == ConnectionState.waiting;
+        final ok = snap.data == true;
+        final color = loading
+            ? const Color(0xFF00d4ff)
+            : ok
                 ? const Color(0xFF00ff88)
-                : const Color(0xFFff6b35),
-            size: 18,
+                : const Color(0xFFff6b35);
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0f2035),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.28)),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(provider,
-                    style: GoogleFonts.orbitron(
-                        color: const Color(0xFF00d4ff),
-                        fontSize: 11,
-                        letterSpacing: 2)),
-                const SizedBox(height: 2),
-                Text(display,
-                    style: GoogleFonts.rajdhani(
-                        color: Colors.white.withValues(alpha: 0.45), fontSize: 12)),
-              ],
-            ),
+          child: Row(
+            children: [
+              loading
+                  ? SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: color),
+                    )
+                  : Icon(
+                      ok ? Icons.check_circle_outline : Icons.error_outline,
+                      color: color,
+                      size: 18,
+                    ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('FASTAPI BACKEND',
+                        style: GoogleFonts.orbitron(
+                            color: const Color(0xFF00d4ff),
+                            fontSize: 11,
+                            letterSpacing: 2)),
+                    const SizedBox(height: 2),
+                    Text(backendBaseUrl,
+                        style: GoogleFonts.rajdhani(
+                            color: Colors.white.withValues(alpha: 0.45),
+                            fontSize: 12)),
+                    const SizedBox(height: 2),
+                    Text(
+                      loading
+                          ? 'Checking…'
+                          : ok
+                              ? 'Connected'
+                              : 'Unreachable',
+                      style: GoogleFonts.rajdhani(
+                          color: color.withValues(alpha: 0.8), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Widget _ownStatus() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0f2035),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: const Color(0xFF00d4ff).withValues(alpha: 0.28),
-        ),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.electrical_services_outlined,
-              color: Color(0xFF00d4ff), size: 18),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('OWN (FastAPI)',
-                    style: GoogleFonts.orbitron(
-                        color: const Color(0xFF00d4ff),
-                        fontSize: 11,
-                        letterSpacing: 2)),
-                const SizedBox(height: 2),
-                Text(ownApiUrl,
-                    style: GoogleFonts.rajdhani(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 12)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+  Future<bool> _pingBackend() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$backendBaseUrl/health'))
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return false;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['status'] == 'ok';
+    } catch (_) {
+      return false;
+    }
   }
 
   Widget _actionTile({
@@ -249,6 +184,4 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
   }
-
-  int min(int a, int b) => a < b ? a : b;
 }
