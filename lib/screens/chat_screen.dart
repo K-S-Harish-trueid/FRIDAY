@@ -28,6 +28,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _historyKey = GlobalKey<HistoryDrawerState>();
   bool _sendPulse = false;
 
+  // Hold-to-talk mic: press starts listening, drag away past the threshold
+  // arms a cancel, release either sends (normal) or discards (cancelling).
+  static const _cancelSlideThreshold = 80.0;
+  bool _isRecording = false;
+  bool _isCancelling = false;
+  Offset? _holdStartPosition;
+
   late final SpeechService _speechService;
   late final TtsService _ttsService;
 
@@ -101,17 +108,56 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
-  // ── Mic toggle ────────────────────────────────────────────────────────────
+  // ── Mic hold-to-talk ─────────────────────────────────────────────────────
 
-  Future<void> _toggleSpeech() async {
-    if (_speechService.status.value != SpeechStatus.idle) {
-      _speechService.stopListening();
-      await _ttsService.stop();
-    } else {
-      final busy = ref.read(chatProvider);
-      if (busy.isTyping || busy.isExecutingAction) return;
-      await _speechService.startListening();
+  Future<void> _handleMicHoldStart(LongPressStartDetails details) async {
+    final busy = ref.read(chatProvider);
+    if (busy.isTyping || busy.isExecutingAction) return;
+
+    HapticFeedback.mediumImpact();
+    await _ttsService.stop();
+    setState(() {
+      _isRecording = true;
+      _isCancelling = false;
+      _holdStartPosition = details.globalPosition;
+    });
+    await _speechService.startListening();
+  }
+
+  void _handleMicHoldMove(LongPressMoveUpdateDetails details) {
+    if (_holdStartPosition == null) return;
+    final dragged =
+        (details.globalPosition - _holdStartPosition!).distance >
+            _cancelSlideThreshold;
+    if (dragged != _isCancelling) {
+      setState(() => _isCancelling = dragged);
+      if (dragged) HapticFeedback.heavyImpact();
     }
+  }
+
+  void _handleMicHoldEnd(LongPressEndDetails details) {
+    final cancelling = _isCancelling;
+    setState(() {
+      _isRecording = false;
+      _isCancelling = false;
+      _holdStartPosition = null;
+    });
+    if (cancelling) {
+      _speechService.cancelListening();
+    } else {
+      // Finalizes the current listen; the recognized text (if any) flows
+      // through SpeechService.onResult -> _sendFromSpeech.
+      _speechService.stopListening();
+    }
+  }
+
+  void _handleMicHoldCancel() {
+    setState(() {
+      _isRecording = false;
+      _isCancelling = false;
+      _holdStartPosition = null;
+    });
+    _speechService.cancelListening();
   }
 
   // ── Scroll ────────────────────────────────────────────────────────────────
@@ -327,7 +373,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             valueListenable: _speechService.status,
             builder: (_, status, _) => Text(
               status == SpeechStatus.idle
-                  ? 'Tap the mic or type "help" to begin'
+                  ? 'Hold the mic to talk, or type "help" to begin'
                   : status == SpeechStatus.listening
                       ? 'Listening...'
                       : 'Processing...',
@@ -364,8 +410,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 builder: (context, partial, child) => _VoiceOverlay(
                   status: status,
                   partialText: partial,
+                  isCancelling: _isCancelling,
                   onStop: () {
-                    _speechService.stopListening();
+                    _speechService.cancelListening();
                     _ttsService.stop();
                   },
                 ),
@@ -385,6 +432,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           children: [
             Expanded(
               child: TextField(
+                key: const Key('chat_text_field'),
                 controller: _textCtrl,
                 focusNode: _focusNode,
                 enabled: !busy,
@@ -425,14 +473,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // ── Mic button ──
+            // ── Mic button (hold to talk, slide away to cancel) ──
             ValueListenableBuilder<SpeechStatus>(
               valueListenable: _speechService.status,
               builder: (_, status, _) {
-                final isListening = status == SpeechStatus.listening;
                 final isProcessing = status == SpeechStatus.processing;
+                final idleColor = const Color(0xFF00d4ff).withValues(alpha: 0.4);
+                final micColor = _isCancelling
+                    ? const Color(0xFFff6b35)
+                    : _isRecording
+                        ? const Color(0xFF00ff88)
+                        : isProcessing
+                            ? const Color(0xFFff6b35)
+                            : idleColor;
+                final iconColor = _isCancelling || _isRecording
+                    ? micColor
+                    : const Color(0xFF00d4ff).withValues(alpha: 0.55);
                 return GestureDetector(
-                  onTap: _toggleSpeech,
+                  key: const Key('chat_mic_button'),
+                  onLongPressStart: busy ? null : _handleMicHoldStart,
+                  onLongPressMoveUpdate: busy ? null : _handleMicHoldMove,
+                  onLongPressEnd: busy ? null : _handleMicHoldEnd,
+                  onLongPressCancel: busy ? null : _handleMicHoldCancel,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     width: 46,
@@ -440,19 +502,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     decoration: BoxDecoration(
                       color: const Color(0xFF0f2035),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isListening
-                            ? const Color(0xFF00ff88)
-                            : isProcessing
-                                ? const Color(0xFFff6b35)
-                                : const Color(0xFF00d4ff).withValues(alpha: 0.4),
-                        width: 1.5,
-                      ),
-                      boxShadow: isListening
+                      border: Border.all(color: micColor, width: 1.5),
+                      boxShadow: (_isRecording || _isCancelling)
                           ? [
                               BoxShadow(
-                                color: const Color(0xFF00ff88)
-                                    .withValues(alpha: 0.3),
+                                color: micColor.withValues(alpha: 0.3),
                                 blurRadius: 10,
                               )
                             ]
@@ -478,10 +532,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             ),
                           )
                         : Icon(
-                            isListening ? Icons.mic : Icons.mic_none,
-                            color: isListening
-                                ? const Color(0xFF00ff88)
-                                : const Color(0xFF00d4ff).withValues(alpha: 0.55),
+                            _isCancelling
+                                ? Icons.delete_outline
+                                : _isRecording
+                                    ? Icons.mic
+                                    : Icons.mic_none,
+                            color: iconColor,
                             size: 22,
                           ),
                   ),
@@ -491,6 +547,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             const SizedBox(width: 8),
             // ── Send button (arc reactor) ──
             GestureDetector(
+              key: const Key('chat_send_button'),
               onTap: busy ? null : _send,
               child: AnimatedOpacity(
                 opacity: busy ? 0.35 : 1.0,
@@ -537,11 +594,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 class _VoiceOverlay extends StatefulWidget {
   final SpeechStatus status;
   final String partialText;
+  final bool isCancelling;
   final VoidCallback onStop;
 
   const _VoiceOverlay({
     required this.status,
     required this.partialText,
+    required this.isCancelling,
     required this.onStop,
   });
 
@@ -571,6 +630,12 @@ class _VoiceOverlayState extends State<_VoiceOverlay>
   @override
   Widget build(BuildContext context) {
     final isListening = widget.status == SpeechStatus.listening;
+    final cancelling = widget.isCancelling;
+    final accent = cancelling
+        ? const Color(0xFFff6b35)
+        : isListening
+            ? const Color(0xFF00ff88)
+            : const Color(0xFFff6b35);
 
     return AnimatedBuilder(
       animation: _ctrl,
@@ -581,29 +646,23 @@ class _VoiceOverlayState extends State<_VoiceOverlay>
           decoration: BoxDecoration(
             color: const Color(0xFF0a1628),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isListening
-                  ? const Color(0xFF00ff88).withValues(alpha: 0.45)
-                  : const Color(0xFFff6b35).withValues(alpha: 0.45),
-              width: 1.2,
-            ),
+            border: Border.all(color: accent.withValues(alpha: 0.45), width: 1.2),
             boxShadow: [
-              BoxShadow(
-                color: isListening
-                    ? const Color(0xFF00ff88).withValues(alpha: 0.08)
-                    : const Color(0xFFff6b35).withValues(alpha: 0.08),
-                blurRadius: 14,
-              ),
+              BoxShadow(color: accent.withValues(alpha: 0.08), blurRadius: 14),
             ],
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Waveform bars or spinner
+              // Waveform bars, cancel icon, or spinner
               SizedBox(
                 width: 40,
                 height: 28,
-                child: isListening ? _buildBars() : _buildSpinner(),
+                child: cancelling
+                    ? Icon(Icons.delete_outline, color: accent, size: 24)
+                    : isListening
+                        ? _buildBars()
+                        : _buildSpinner(),
               ),
               const SizedBox(width: 12),
               // Status label + live text
@@ -613,20 +672,24 @@ class _VoiceOverlayState extends State<_VoiceOverlay>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      isListening ? 'LISTENING' : 'PROCESSING',
+                      cancelling
+                          ? 'RELEASE TO CANCEL'
+                          : isListening
+                              ? 'LISTENING — RELEASE TO SEND'
+                              : 'PROCESSING',
                       style: GoogleFonts.orbitron(
-                        color: isListening
-                            ? const Color(0xFF00ff88)
-                            : const Color(0xFFff6b35),
+                        color: accent,
                         fontSize: 9,
                         letterSpacing: 2,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      widget.partialText.isNotEmpty
-                          ? widget.partialText
-                          : 'Speak now...',
+                      cancelling
+                          ? 'Message will be discarded'
+                          : widget.partialText.isNotEmpty
+                              ? widget.partialText
+                              : 'Speak now...',
                       style: GoogleFonts.rajdhani(
                         color: widget.partialText.isNotEmpty
                             ? Colors.white.withValues(alpha: 0.85)

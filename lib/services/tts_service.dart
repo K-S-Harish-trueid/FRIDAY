@@ -19,20 +19,42 @@ class TtsService {
     _initialized = true;
   }
 
+  // TTS is a nice-to-have on top of the chat flow — a plugin hiccup here
+  // (uninitialized engine, no voices installed, platform error) must never
+  // block sending or receiving a message. Every call is best-effort and
+  // time-boxed: a hung platform channel call must not be able to freeze
+  // the whole send pipeline, since stop() runs unconditionally before
+  // every send.
+  static const _guardTimeout = Duration(seconds: 2);
+
   Future<void> speak(String text) async {
-    await _init();
-    final clean = _stripMarkdown(text);
-    if (clean.isEmpty) return;
-    await _tts.stop();
-    await _tts.speak(clean);
+    try {
+      await _init().timeout(_guardTimeout);
+      final clean = _stripMarkdown(text);
+      if (clean.isEmpty) return;
+      await _tts.stop().timeout(_guardTimeout);
+      await _tts.speak(clean).timeout(_guardTimeout);
+    } catch (_) {
+      // best-effort
+    }
   }
 
   Future<void> stop() async {
-    await _tts.stop();
+    try {
+      await _tts.stop().timeout(_guardTimeout);
+    } catch (_) {
+      // best-effort — in particular, this must not block before the
+      // engine has ever been initialized (stop() is called unconditionally
+      // on every send, long before speak() may have run _init()).
+    }
   }
 
   void dispose() {
-    _tts.stop();
+    try {
+      _tts.stop();
+    } catch (_) {
+      // best-effort
+    }
   }
 
   /// Strips bullet chars and collapses newlines so TTS reads naturally.

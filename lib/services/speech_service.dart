@@ -52,10 +52,24 @@ class SpeechService {
     _listen();
   }
 
+  /// Finalizes the current listen and delivers whatever was recognized so
+  /// far via [onResult] (speech_to_text's `stop()` requests a final result,
+  /// unlike `cancel()` which discards). Used when the user releases the mic
+  /// normally — hold to talk, release to send.
   void stopListening() {
     _continuousMode = false;
     _paused = false;
     _stt.stop();
+    status.value = SpeechStatus.idle;
+    partialText.value = '';
+  }
+
+  /// Discards the current listen without delivering a result. Used when the
+  /// user slides away from the mic button to cancel an accidental hold.
+  void cancelListening() {
+    _continuousMode = false;
+    _paused = false;
+    _stt.cancel();
     status.value = SpeechStatus.idle;
     partialText.value = '';
   }
