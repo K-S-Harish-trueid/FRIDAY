@@ -56,6 +56,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _send() async {
     final text = _textCtrl.text.trim();
     if (text.isEmpty) return;
+    final busy = ref.read(chatProvider);
+    if (busy.isTyping || busy.isExecutingAction) return;
 
     HapticFeedback.lightImpact();
     await _ttsService.stop();
@@ -71,6 +73,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   // ── Voice-triggered send ──────────────────────────────────────────────────
 
   Future<void> _sendFromSpeech(String text) async {
+    final busy = ref.read(chatProvider);
+    if (busy.isTyping || busy.isExecutingAction) return;
+
     _speechService.pause();
     await _ttsService.stop();
     HapticFeedback.lightImpact();
@@ -103,6 +108,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       _speechService.stopListening();
       await _ttsService.stop();
     } else {
+      final busy = ref.read(chatProvider);
+      if (busy.isTyping || busy.isExecutingAction) return;
       await _speechService.startListening();
     }
   }
@@ -158,7 +165,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             children: [
               _buildAppBar(state.activeProvider),
               Expanded(child: _buildMessages(state)),
-              _buildInputBar(state.isExecutingAction),
+              _buildInputBar(
+                isExecutingAction: state.isExecutingAction,
+                busy: state.isTyping || state.isExecutingAction,
+              ),
             ],
           ),
         ],
@@ -336,7 +346,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   // ── Input bar ─────────────────────────────────────────────────────────────
 
-  Widget _buildInputBar(bool isExecutingAction) {
+  Widget _buildInputBar({required bool isExecutingAction, required bool busy}) {
     return SafeArea(
       top: false,
       child: Column(
@@ -377,9 +387,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               child: TextField(
                 controller: _textCtrl,
                 focusNode: _focusNode,
-                style: GoogleFonts.rajdhani(color: Colors.white, fontSize: 16),
+                enabled: !busy,
+                style: GoogleFonts.rajdhani(
+                  color: Colors.white.withValues(alpha: busy ? 0.4 : 1.0),
+                  fontSize: 16,
+                ),
                 decoration: InputDecoration(
-                  hintText: 'Ask me anything, boss...',
+                  hintText: busy ? 'FRIDAY is responding…' : 'Ask me anything, boss...',
                   hintStyle: GoogleFonts.rajdhani(
                     color: Colors.white.withValues(alpha: 0.28),
                     fontSize: 16,
@@ -405,7 +419,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ),
                 ),
                 textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _send(),
+                onSubmitted: busy ? null : (_) => _send(),
                 minLines: 1,
                 maxLines: 4,
               ),
@@ -477,27 +491,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             const SizedBox(width: 8),
             // ── Send button (arc reactor) ──
             GestureDetector(
-              onTap: _send,
-              child: AnimatedScale(
-                scale: _sendPulse ? 0.82 : 1.0,
-                duration: const Duration(milliseconds: 150),
-                child: Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0f2035),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: const Color(0xFF00d4ff), width: 1.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF00d4ff).withValues(alpha: 0.3),
-                        blurRadius: 10,
-                      ),
-                    ],
-                  ),
-                  child: const Center(
-                    child: ArcReactorWidget(size: 30, animate: true),
+              onTap: busy ? null : _send,
+              child: AnimatedOpacity(
+                opacity: busy ? 0.35 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                child: AnimatedScale(
+                  scale: _sendPulse ? 0.82 : 1.0,
+                  duration: const Duration(milliseconds: 150),
+                  child: Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0f2035),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: const Color(0xFF00d4ff), width: 1.5),
+                      boxShadow: busy
+                          ? null
+                          : [
+                              BoxShadow(
+                                color: const Color(0xFF00d4ff)
+                                    .withValues(alpha: 0.3),
+                                blurRadius: 10,
+                              ),
+                            ],
+                    ),
+                    child: const Center(
+                      child: ArcReactorWidget(size: 30, animate: true),
+                    ),
                   ),
                 ),
               ),

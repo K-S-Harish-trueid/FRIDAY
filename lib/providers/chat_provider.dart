@@ -68,6 +68,9 @@ class ChatNotifier extends Notifier<ChatState> {
 
   Future<void> sendMessage(String content) async {
     if (content.trim().isEmpty) return;
+    // Block a new message while one is already in flight (typing or
+    // running a device action) — prevents overlapping/out-of-order sends.
+    if (state.isTyping || state.isExecutingAction) return;
 
     final userMsg = Message(role: 'user', content: content);
     state = state.copyWith(messages: [...state.messages, userMsg]);

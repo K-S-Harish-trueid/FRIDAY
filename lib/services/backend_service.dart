@@ -88,4 +88,17 @@ class BackendService {
       throw Exception('Failed to delete conversation');
     }
   }
+
+  /// Deletes every conversation. Best-effort per item — a single failure
+  /// doesn't stop the rest from being attempted.
+  static Future<void> deleteAllConversations() async {
+    final conversations = await listConversations();
+    for (final conv in conversations) {
+      try {
+        await deleteConversation(conv.id);
+      } catch (_) {
+        // continue deleting the rest
+      }
+    }
+  }
 }
